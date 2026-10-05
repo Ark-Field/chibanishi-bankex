@@ -9,8 +9,8 @@ st.title("🏦 銀行・CNSデータ 統合管理ツール")
 
 # タブ構成（全4タブ）
 tab1, tab2, tab3, tab4 = st.tabs([
-    "引き落としデータ作成（書き出し）",                         # タブ1
-    "入金データ変換（読み込み）",                            # タブ2
+    "引き落としデータ作成（書き出し）",                                       # タブ1
+    "入金データ変換（読み込み）",                                             # タブ2
     "CNSコンビニ収納データ作成（17列CSV）",      # タブ3
     "CNSコンビニ収納データ取込（入金データ＋入金マスタ）"         # タブ4
 ])
@@ -129,20 +129,20 @@ with tab1:
                         branch_code_str = sjis_zfill(str(row['支店ID']).strip(), 3)
                         
                         line_str = (
-                            p_bank_id +                 
-                            " " * 9 +                   
-                            branch_code_str +           
+                            p_bank_id +             
+                            " " * 9 +               
+                            branch_code_str +       
                             sjis_ljust("ﾏｸﾊﾘ", 10) +   
-                            " " * 3 +                   
-                            p_acc_type +                
-                            p_acc_num +                 
-                            p_name +                    
-                            p_amt +                     
-                            p_kbn +                     
-                            p_bank_code_2134 +          
-                            p_seiri +                   
-                            p_nyukin +                  
-                            " " * 4                     
+                            " " * 3 +               
+                            p_acc_type +            
+                            p_acc_num +             
+                            p_name +                
+                            p_amt +                 
+                            p_kbn +                 
+                            p_bank_code_2134 +      
+                            p_seiri +               
+                            p_nyukin +              
+                            " " * 4                 
                         )
                     
                     encoded_line = line_str.encode('cp932', errors='ignore')
@@ -384,7 +384,7 @@ with tab3:
 
 
 # =====================================================================
-# 🔗 タブ4：マスタ自動紐づけ（顧客コード ⇔ 整理番号）＋ 処理日時変換 ＋ 不明入金切り分け
+# 🔗 タブ4：マスタ自動紐づけ（顧客コード ⇔ 整理番号）＋ 日付フォーマット変換 ＋ 不明入金切り分け
 # =====================================================================
 with tab4:
     st.subheader("🔗 マスタ自動紐づけ＆不明入金切り分け")
@@ -466,11 +466,20 @@ with tab4:
                     df_unknown["入金番号"] = ""
                     df_unknown = df_unknown.drop(columns=['tmp_key'])
 
-                    # 共通処理：もし「処理日時」列があれば年月日に綺麗にフォーマット変換する
+                    # 共通処理：日付関連の列（処理日時、収納日付など）を YYYY/MM/DD 形式に統一変換する
                     for target_df in [df_matched, df_unknown]:
+                        # 「処理日時」の変換
                         if "処理日時" in target_df.columns:
                             parsed_dates = pd.to_datetime(target_df["処理日時"], errors='coerce')
                             target_df["処理日時"] = parsed_dates.dt.strftime("%Y/%m/%d").fillna(target_df["処理日時"])
+                        
+                        # 🌟 「収納日付」（9個目のフィールド等、列名に「日付」や「収納」を含むもの、あるいは特定の列）を YYYY/MM/DD に変換
+                        # ※列名が完全一致、または含まれるものを対象にします
+                        for col_name in target_df.columns:
+                            if "収納日付" in col_name or "収納日" in col_name or col_name == target_df.columns[8] if len(target_df.columns) > 8 else False:
+                                parsed_shuno = pd.to_datetime(target_df[col_name], errors='coerce')
+                                # もすでに入力がYYYYMMDDの文字列の場合はdatetimeが解釈できるためスラッシュ付きに変換
+                                target_df[col_name] = parsed_shuno.dt.strftime("%Y/%m/%d").fillna(target_df[col_name])
 
                     # 🌟 日付文字列（YYMMDD形式）の作成（例: 261006）
                     yymmdd_str = datetime.now().strftime("%y%m%d")
@@ -488,7 +497,6 @@ with tab4:
                         st.download_button(
                             label="📥 正常紐づけデータを保存 (CSV)",
                             data=buf_matched.getvalue(),
-                            # 🌟 ここで日本語ファイル名を指定（例: 【入金完了データ261006】.csv）
                             file_name=f"【入金完了データ{yymmdd_str}】.csv",
                             mime="text/csv",
                             key="tab4_success_dl"
@@ -507,7 +515,6 @@ with tab4:
                         st.download_button(
                             label="📥 不明入金データを保存 (入金番号ブランク・CSV)",
                             data=buf_unknown.getvalue(),
-                            # 🌟 不明入金側も同様に日本語ファイル名にカスタマイズ可能
                             file_name=f"【不明入金データ{yymmdd_str}】.csv",
                             mime="text/csv",
                             key="tab4_unknown_dl"
