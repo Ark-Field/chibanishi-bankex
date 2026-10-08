@@ -212,7 +212,7 @@ with tab1:
 # =====================================================================
 with tab2:
     st.subheader("📥 入金データ読み込み・変換")
-    st.markdown("入金データを読み込み、結果区分や入金額を追加して変換します。（京葉銀行は.dat固定長 ＆ 入金番号の整数化（0頭カット）に対応）")
+    st.markdown("入金データを読み込み、結果区分や入金額を追加して変換します。（京葉銀行は.dat固定長 ＆ 入金番号の正確な95〜105文字目切り出しに対応）")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -252,13 +252,15 @@ with tab2:
                     if len(b_line) < 120:  
                         continue
                     try:
-                        tail_str = b_line[101:120].decode("cp932", errors="ignore").strip()
-                        last_digit = tail_str[-1] if len(tail_str) >= 1 else ""
-                        result_text = result_mapping.get(last_digit, "その他")
                         seikyu_amt = int(b_line[80:90].decode("cp932", errors="ignore").strip())
+                        last_digit = b_line[90:91].decode("cp932", errors="ignore").strip()
+                        result_text = result_mapping.get(last_digit, "その他")
                         nyukin_amt = seikyu_amt if last_digit == "0" else 0
                         
-                        raw_nyukin_part = tail_str[:-1].strip() if len(tail_str) >= 1 else tail_str
+                        # 🌟 修正：95文字目〜105文字目（Pythonインデックス 94:105）から入金番号を切り出す
+                        raw_nyukin_part = b_line[94:105].decode("cp932", errors="ignore").strip()
+                        
+                        # 整数化して先頭の0をカットする
                         nyukin_val = int(pd.to_numeric(pd.Series([raw_nyukin_part]), errors='coerce').fillna(0).iloc[0])
                         seiri_num = str(nyukin_val)
                         
@@ -497,7 +499,6 @@ with tab4:
                     df_matched = df_t4_n[is_matched].copy()
                     matched_col = df_matched['tmp_key'].map(master_dict)
                     
-                    # 🌟 修正済み：末尾にコロンを追加しました
                     if "入金番号" in df_matched.columns:
                         df_matched["入金番号"] = matched_col.fillna(df_matched["入金番号"])
                     else:
