@@ -216,7 +216,7 @@ with tab2:
     
     col1, col2 = st.columns(2)
     with col1:
-        bank = st.selectbox("読み込む銀行", ["千葉銀行", "京葉銀行"], key="tab2_bank")
+        bank = st.selectbox("読み込む銀行", ["千葉銀行", "京葉銀行(日本収納)"], key="tab2_bank")
     with col2:
         processing_date = st.date_input("処理日（入金日）を入力", value=datetime.now(), key="tab2_date")
         proc_date_str = processing_date.strftime("%Y/%m/%d")
@@ -230,7 +230,6 @@ with tab2:
 
     if uploaded_file:
         try:
-            # ファイル全体の読み込み（バイト＆文字コード判定）
             try:
                 raw_bytes = uploaded_file.read()
                 raw = raw_bytes.decode("cp932", errors="ignore")
@@ -259,12 +258,8 @@ with tab2:
                         seikyu_amt = int(b_line[80:90].decode("cp932", errors="ignore").strip())
                         nyukin_amt = seikyu_amt if last_digit == "0" else 0
                         
-                        # 固定長データから該当する入金番号部分を取得し、整数化して0頭をカットする
-                        # （例: "2607061033" や "02607061033" などを整数に変換）
                         raw_nyukin_part = tail_str[:-1].strip() if len(tail_str) >= 1 else tail_str
                         nyukin_val = int(pd.to_numeric(pd.Series([raw_nyukin_part]), errors='coerce').fillna(0).iloc[0])
-                        
-                        # 整理番号も必要に応じて保持
                         seiri_num = str(nyukin_val)
                         
                         row = {
@@ -282,7 +277,7 @@ with tab2:
                             "入力日": today_str        
                         }
                         parsed.append(row)
-                    except:
+                    except Exception:
                         continue
                 
                 # -------------------------------------------------------------
@@ -323,7 +318,7 @@ with tab2:
                             "入力日": today_str        
                         }
                         parsed.append(row)
-                    except:
+                    except Exception:
                         continue
             
             if parsed:
@@ -558,3 +553,4 @@ with tab4:
                             key="tab4_unknown_dl"
                         )
         except Exception as e:
+            st.error(f"❌ 処理中にエラーが発生しました: {e}")
