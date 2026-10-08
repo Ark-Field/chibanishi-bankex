@@ -208,11 +208,11 @@ with tab1:
 
 
 # =====================================================================
-# 📥 タブ2：入金データ変換（読み込み）【京葉: 下7桁＋0頭カット対応】
+# 📥 タブ2：入金データ変換（読み込み）【千葉=CSV / 京葉=.dat固定長（入金番号整数化対応）】
 # =====================================================================
 with tab2:
     st.subheader("📥 入金データ読み込み・変換")
-    st.markdown("入金データを読み込み、結果区分や入金額を追加して変換します。（京葉銀行は下7桁抽出＆0頭カットでマスタ置換に対応）")
+    st.markdown("入金データを読み込み、結果区分や入金額を追加して変換します。（京葉銀行は.dat固定長 ＆ 入金番号の整数化（0頭カット）に対応）")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -220,12 +220,6 @@ with tab2:
     with col2:
         processing_date = st.date_input("処理日（入金日）を入力", value=datetime.now(), key="tab2_date")
         proc_date_str = processing_date.strftime("%Y/%m/%d")
-
-    # 京葉銀行の場合のみマスタアップロード欄を表示
-    tab2_master_file = None
-    if bank == "京葉銀行":
-        st.markdown("##### 📁 京葉銀行用マスタファイル（整理番号 ⇔ 入金番号）")
-        tab2_master_file = st.file_uploader("整理番号と入金番号が含まれるマスタファイルを選択（.csv / .xlsx）", type=["csv", "xlsx"], key="tab2_master_uploader")
 
     uploaded_file = st.file_uploader("入金データファイルをアップロードしてください（千葉銀行: .csv / 京葉銀行: .dat, .txt）", type=["csv", "txt", "dat"], key="tab2_uploader")
     
@@ -236,30 +230,6 @@ with tab2:
 
     if uploaded_file:
         try:
-            # 京葉銀行マスタの読み込み（京葉選択時のみ）
-            master_dict = {}
-            if bank == "京葉銀行" and tab2_master_file is not None:
-                try:
-                    if tab2_master_file.name.endswith(".xlsx"):
-                        df_m = pd.read_excel(tab2_master_file, dtype=str)
-                    else:
-                        try:
-                            df_m = pd.read_csv(tab2_master_file, encoding="cp932", dtype=str)
-                        except UnicodeDecodeError:
-                            tab2_master_file.seek(0)
-                            df_m = pd.read_csv(tab2_master_file, encoding="utf-8", dtype=str)
-                    
-                    df_m = df_m.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-                    
-                    if "整理番号" in df_m.columns and "入金番号" in df_m.columns:
-                        df_m['tmp_key'] = pd.to_numeric(df_m['整理番号'], errors='coerce').fillna(0).astype(int).astype(str)
-                        master_dict = dict(zip(df_m['tmp_key'], df_m["入金番号"]))
-                        st.success(f"✅ 京葉銀行マスタを読み込みました（登録件数: {len(master_dict)} 件）")
-                    else:
-                        st.warning("⚠️ マスタファイルに「整理番号」または「入金番号」列が見つかりません。")
-                except Exception as me:
-                    st.warning(f"⚠️ マスタファイルの読み込みに失敗しました: {me}")
-
             # ファイル全体の読み込み（バイト＆文字コード判定）
             try:
                 raw_bytes = uploaded_file.read()
@@ -289,18 +259,13 @@ with tab2:
                         seikyu_amt = int(b_line[80:90].decode("cp932", errors="ignore").strip())
                         nyukin_amt = seikyu_amt if last_digit == "0" else 0
                         
-                        # 整理番号の抽出（末尾の1文字＝結果区分を除いた部分）
-                        raw_seiri = tail_str[:-1].strip() if len(tail_str) >= 1 else tail_str
+                        # 固定長データから該当する入金番号部分を取得し、整数化して0頭をカットする
+                        # （例: "2607061033" や "02607061033" などを整数に変換）
+                        raw_nyukin_part = tail_str[:-1].strip() if len(tail_str) >= 1 else tail_str
+                        nyukin_val = int(pd.to_numeric(pd.Series([raw_nyukin_part]), errors='coerce').fillna(0).iloc[0])
                         
-                        # 🌟 下7桁を切り取り、数値化（int）して先頭の0をカットする
-                        sub_seiri = raw_seiri[-7:] if len(raw_seiri) >= 7 else raw_seiri
-                        seiri_num = int(pd.to_numeric(pd.Series([sub_seiri]), errors='coerce').fillna(0).iloc[0])
-                        
-                        # マスタ検索用のキー
-                        key_val = str(seiri_num)
-                        
-                        # マスタから入金番号を引く
-                        nyukin_val = master_dict.get(key_val, "")
+                        # 整理番号も必要に応じて保持
+                        seiri_num = str(nyukin_val)
                         
                         row = {
                             "銀行ID": b_line[1:5].decode("cp932", errors="ignore").strip(), 
@@ -593,4 +558,3 @@ with tab4:
                             key="tab4_unknown_dl"
                         )
         except Exception as e:
-            st.error(f"❌ 処理中にエラーが発生しました: {e}")
