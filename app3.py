@@ -208,7 +208,7 @@ with tab1:
 
 
 # =====================================================================
-# 📥 タブ2：入金データ変換（読み込み）【千葉=CSV / 京葉=.dat固定長（入金番号整数化対応）】
+# 📥 タブ2：入金データ変換（読み込み）
 # =====================================================================
 with tab2:
     st.subheader("📥 入金データ読み込み・変換")
@@ -216,7 +216,7 @@ with tab2:
     
     col1, col2 = st.columns(2)
     with col1:
-        bank = st.selectbox("読み込む銀行", ["千葉銀行", "京葉銀行(日本収納)"], key="tab2_bank")
+        bank = st.selectbox("読み込む銀行", ["千葉銀行", "京葉銀行"], key="tab2_bank")
     with col2:
         processing_date = st.date_input("処理日（入金日）を入力", value=datetime.now(), key="tab2_date")
         proc_date_str = processing_date.strftime("%Y/%m/%d")
@@ -241,7 +241,8 @@ with tab2:
             today_str = datetime.now().strftime("%Y/%m/%d")
             
             for line in lines:
-                if not line.startswith("2"):  
+                # 🌟 前後の空白や見えない制御文字を無視して '2' で始まる行を抽出する
+                if not line.strip().startswith("2"):  
                     continue
                 
                 # -------------------------------------------------------------
@@ -496,61 +497,4 @@ with tab4:
 
                     df_matched = df_t4_n[is_matched].copy()
                     matched_col = df_matched['tmp_key'].map(master_dict)
-                    if "入金番号" in df_matched.columns:
-                        df_matched["入金番号"] = matched_col.fillna(df_matched["入金番号"])
-                    else:
-                        df_matched["入金番号"] = matched_col.fillna("")
-                    df_matched = df_matched.drop(columns=['tmp_key'])
-
-                    df_unknown = df_t4_n[~is_matched].copy()
-                    df_unknown["入金番号"] = ""
-                    df_unknown = df_unknown.drop(columns=['tmp_key'])
-
-                    for target_df in [df_matched, df_unknown]:
-                        if "処理日時" in target_df.columns:
-                            parsed_dates = pd.to_datetime(target_df["処理日時"], errors='coerce')
-                            target_df["処理日時"] = parsed_dates.dt.strftime("%Y/%m/%d").fillna(target_df["処理日時"])
-                        
-                        for col_name in target_df.columns:
-                            if "収納日付" in col_name or "収納日" in col_name or col_name == target_df.columns[8] if len(target_df.columns) > 8 else False:
-                                parsed_shuno = pd.to_datetime(target_df[col_name], errors='coerce')
-                                target_df[col_name] = parsed_shuno.dt.strftime("%Y/%m/%d").fillna(target_df[col_name])
-
-                    yymmdd_str = datetime.now().strftime("%y%m%d")
-
-                    st.markdown("---")
-                    col_res1, col_res2 = st.columns(2)
-
-                    with col_res1:
-                        st.success(f"✅ 正常紐づけデータ: {len(df_matched)} 件")
-                        st.dataframe(df_matched.head(5))
-                        
-                        buf_matched = io.BytesIO()
-                        df_matched.to_csv(buf_matched, index=False, encoding="cp932", lineterminator="\r\n")
-                        st.download_button(
-                            label="📥 正常紐づけデータを保存 (CSV)",
-                            data=buf_matched.getvalue(),
-                            file_name=f"【入金完了データ{yymmdd_str}】.csv",
-                            mime="text/csv",
-                            key="tab4_success_dl"
-                        )
-
-                    with col_res2:
-                        if len(df_unknown) > 0:
-                            st.warning(f"⚠️ 不明入金（マスタなし）: {len(df_unknown)} 件")
-                        else:
-                            st.info(f"ℹ️ 不明入金（マスタなし）: 0 件（すべて正常に紐づきました！）")
-                        
-                        st.dataframe(df_unknown.head(5))
-                        
-                        buf_unknown = io.BytesIO()
-                        df_unknown.to_csv(buf_unknown, index=False, encoding="cp932", lineterminator="\r\n")
-                        st.download_button(
-                            label="📥 不明入金データを保存 (入金番号ブランク・CSV)",
-                            data=buf_unknown.getvalue(),
-                            file_name=f"【不明入金データ{yymmdd_str}】.csv",
-                            mime="text/csv",
-                            key="tab4_unknown_dl"
-                        )
-        except Exception as e:
-            st.error(f"❌ 処理中にエラーが発生しました: {e}")
+                    if "入金番号" in df_matched
