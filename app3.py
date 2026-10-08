@@ -208,11 +208,11 @@ with tab1:
 
 
 # =====================================================================
-# 📥 タブ2：入金データ変換（読み込み）【千葉=CSV対応 / 京葉=.dat固定長 ＋ マスタ置換対応】
+# 📥 タブ2：入金データ変換（読み込み）【京葉: 下7桁＋0頭カット対応】
 # =====================================================================
 with tab2:
     st.subheader("📥 入金データ読み込み・変換")
-    st.markdown("入金データを読み込み、結果区分や入金額を追加して変換します。（京葉銀行は.dat固定長ファイル ＆ マスタによる入金番号置換に対応）")
+    st.markdown("入金データを読み込み、結果区分や入金額を追加して変換します。（京葉銀行は下7桁抽出＆0頭カットでマスタ置換に対応）")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -290,12 +290,16 @@ with tab2:
                         nyukin_amt = seikyu_amt if last_digit == "0" else 0
                         
                         # 整理番号の抽出（末尾の1文字＝結果区分を除いた部分）
-                        seiri_num = tail_str[:-1].strip() if len(tail_str) >= 1 else tail_str
+                        raw_seiri = tail_str[:-1].strip() if len(tail_str) >= 1 else tail_str
                         
-                        # マスタから入金番号を引くためのキー化
-                        key_val = str(int(pd.to_numeric(pd.Series([seiri_num]), errors='coerce').fillna(0).iloc[0])) if seiri_num else ""
+                        # 🌟 下7桁を切り取り、数値化（int）して先頭の0をカットする
+                        sub_seiri = raw_seiri[-7:] if len(raw_seiri) >= 7 else raw_seiri
+                        seiri_num = int(pd.to_numeric(pd.Series([sub_seiri]), errors='coerce').fillna(0).iloc[0])
                         
-                        # マスタに存在すれば入金番号を置換、なければ空文字またはそのまま
+                        # マスタ検索用のキー
+                        key_val = str(seiri_num)
+                        
+                        # マスタから入金番号を引く
                         nyukin_val = master_dict.get(key_val, "")
                         
                         row = {
