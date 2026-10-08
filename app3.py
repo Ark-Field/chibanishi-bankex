@@ -4,14 +4,14 @@ from datetime import datetime
 import io
 
 # ページ全体のレイアウト設定（ワイド表示）
-st.set_page_config(layout="wide", page_title="銀行・CNSデータ 統合管理ツール", page_icon="🏦")
-st.title("🏦 銀行・CNSデータ 統合管理ツール")
+st.set_page_config(layout="wide", page_title="千葉/京葉銀行・コンビニデータ 統合管理ツール", page_icon="🏦")
+st.title("🏦 千葉/京葉銀行・コンビニデータ 統合管理ツール")
 
 # タブ構成（全4タブ）
 tab1, tab2, tab3, tab4 = st.tabs([
     "引き落としデータ作成（書き出し）",                                       # タブ1
     "入金データ変換（読み込み）",                                             # タブ2
-    "コンビニ収納データ作成（）",      # タブ3
+    "コンビニ収納データ作成（会費/イベント費）",      # タブ3
     "コンビニ収納データ取込（入金データ＋入金マスタ）"          # タブ4
 ])
 
