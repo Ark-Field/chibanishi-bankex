@@ -208,11 +208,11 @@ with tab1:
 
 
 # =====================================================================
-# 📥 タブ2：入金データ変換（読み込み）【千葉銀行正常化 ＆ 京葉銀行マスタ置換対応】
+# 📥 タブ2：入金データ変換（読み込み）【千葉=CSV対応 / 京葉=.dat固定長 ＋ マスタ置換対応】
 # =====================================================================
 with tab2:
     st.subheader("📥 入金データ読み込み・変換")
-    st.markdown("入金データ（CSV）を読み込み、結果区分や入金額を追加して変換します。（京葉銀行はマスタによる入金番号置換に対応）")
+    st.markdown("入金データを読み込み、結果区分や入金額を追加して変換します。（京葉銀行は.dat固定長ファイル ＆ マスタによる入金番号置換に対応）")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -227,7 +227,7 @@ with tab2:
         st.markdown("##### 📁 京葉銀行用マスタファイル（整理番号 ⇔ 入金番号）")
         tab2_master_file = st.file_uploader("整理番号と入金番号が含まれるマスタファイルを選択（.csv / .xlsx）", type=["csv", "xlsx"], key="tab2_master_uploader")
 
-    uploaded_file = st.file_uploader("入金データファイルをアップロードしてください（.csv）", type=["csv", "txt"], key="tab2_uploader")
+    uploaded_file = st.file_uploader("入金データファイルをアップロードしてください（千葉銀行: .csv / 京葉銀行: .dat, .txt）", type=["csv", "txt", "dat"], key="tab2_uploader")
     
     result_mapping = {
         "0": "入金", "1": "残保無", "2": "口座無", "3": "預金者都合",
@@ -236,7 +236,7 @@ with tab2:
 
     if uploaded_file:
         try:
-            # 京葉銀行マスタの読み込み
+            # 京葉銀行マスタの読み込み（京葉選択時のみ）
             master_dict = {}
             if bank == "京葉銀行" and tab2_master_file is not None:
                 try:
@@ -260,7 +260,7 @@ with tab2:
                 except Exception as me:
                     st.warning(f"⚠️ マスタファイルの読み込みに失敗しました: {me}")
 
-            # 入金データの読み込み（CSV形式対応）
+            # ファイル全体の読み込み（バイト＆文字コード判定）
             try:
                 raw_bytes = uploaded_file.read()
                 raw = raw_bytes.decode("cp932", errors="ignore")
@@ -272,58 +272,90 @@ with tab2:
             today_str = datetime.now().strftime("%Y/%m/%d")
             
             for line in lines:
-                cols = [c.strip() for c in line.split(",")]
-                
-                # 先頭が "2" で始まらない行（ヘッダーやフッター）はスキップ
-                if not cols or cols[0] != "2":
-                    continue
-                if len(cols) < 12:
+                if not line.startswith("2"):  
                     continue
                 
-                try:
-                    bank_id = cols[1]
-                    branch_id = cols[2]
-                    acc_type = cols[3]
-                    acc_num = cols[4]
-                    koza_mei = cols[7]
-                    seikyu_amt = int(cols[8])
-                    last_digit = cols[11]
-                    
-                    result_text = result_mapping.get(last_digit, "その他")
-                    nyukin_amt = seikyu_amt if last_digit == "0" else 0
-                    
-                    # 整理番号の抽出と入金番号の決定
-                    raw_col10 = cols[10] if len(cols) > 10 else ""
-                    
-                    if bank == "京葉銀行":
-                        # 整理番号を数値化してキー号にし、マスタから入金番号を引く
-                        clean_seiri = raw_col10.replace("-", "")[:6]
-                        key_val = str(int(pd.to_numeric(pd.Series([clean_seiri]), errors='coerce').fillna(0).iloc[0]))
+                # -------------------------------------------------------------
+                # 📌 【京葉銀行】 全銀協固定長フォーマット（.dat）の処理
+                # -------------------------------------------------------------
+                if bank == "京葉銀行":
+                    b_line = line.encode("cp932", errors="ignore")
+                    if len(b_line) < 120:  
+                        continue
+                    try:
+                        tail_str = b_line[101:120].decode("cp932", errors="ignore").strip()
+                        last_digit = tail_str[-1] if len(tail_str) >= 1 else ""
+                        result_text = result_mapping.get(last_digit, "その他")
+                        seikyu_amt = int(b_line[80:90].decode("cp932", errors="ignore").strip())
+                        nyukin_amt = seikyu_amt if last_digit == "0" else 0
                         
-                        seiri_num = clean_seiri
-                        nyukin_val = master_dict.get(key_val, raw_col10) # マスタになければそのまま
-                    else:
-                        # 千葉銀行はCSVの入金番号（cols[10]）をそのまま保持する
+                        # 整理番号の抽出（末尾の1文字＝結果区分を除いた部分）
+                        seiri_num = tail_str[:-1].strip() if len(tail_str) >= 1 else tail_str
+                        
+                        # マスタから入金番号を引くためのキー化
+                        key_val = str(int(pd.to_numeric(pd.Series([seiri_num]), errors='coerce').fillna(0).iloc[0])) if seiri_num else ""
+                        
+                        # マスタに存在すれば入金番号を置換、なければ空文字またはそのまま
+                        nyukin_val = master_dict.get(key_val, "")
+                        
+                        row = {
+                            "銀行ID": b_line[1:5].decode("cp932", errors="ignore").strip(), 
+                            "支店ID": b_line[20:23].decode("cp932", errors="ignore").strip(),
+                            "普/当": b_line[42:43].decode("cp932", errors="ignore").strip(), 
+                            "口座番号": b_line[43:50].decode("cp932", errors="ignore").strip(),
+                            "ｺｳｻﾞﾒｲ": b_line[50:80].decode("cp932", errors="ignore").strip(), 
+                            "請求額": seikyu_amt, 
+                            "入金額": nyukin_amt, 
+                            "結果区分": result_text,
+                            "整理番号": seiri_num, 
+                            "入金番号": nyukin_val,
+                            "処理日時": proc_date_str,
+                            "入力日": today_str        
+                        }
+                        parsed.append(row)
+                    except:
+                        continue
+                
+                # -------------------------------------------------------------
+                # 📌 【千葉銀行】 CSV形式の戻りデータの処理
+                # -------------------------------------------------------------
+                else:
+                    cols = [c.strip() for c in line.split(",")]
+                    if len(cols) < 12:
+                        continue
+                    try:
+                        bank_id = cols[1]
+                        branch_id = cols[2]
+                        acc_type = cols[3]
+                        acc_num = cols[4]
+                        koza_mei = cols[7]
+                        seikyu_amt = int(cols[8])
+                        last_digit = cols[11]
+                        
+                        result_text = result_mapping.get(last_digit, "その他")
+                        nyukin_amt = seikyu_amt if last_digit == "0" else 0
+                        
+                        raw_col10 = cols[10] if len(cols) > 10 else ""
                         nyukin_val = raw_col10
                         seiri_num = raw_col10.replace("-", "")[:6]
-                    
-                    row = {
-                        "銀行ID": bank_id, 
-                        "支店ID": branch_id,
-                        "普/当": acc_type, 
-                        "口座番号": acc_num,
-                        "ｺｳｻﾞﾒｲ": koza_mei, 
-                        "請求額": seikyu_amt, 
-                        "入金額": nyukin_amt, 
-                        "結果区分": result_text,
-                        "整理番号": seiri_num, 
-                        "入金番号": nyukin_val,
-                        "処理日時": proc_date_str,
-                        "入力日": today_str        
-                    }
-                    parsed.append(row)
-                except Exception as ex:
-                    continue
+                        
+                        row = {
+                            "銀行ID": bank_id, 
+                            "支店ID": branch_id,
+                            "普/当": acc_type, 
+                            "口座番号": acc_num,
+                            "ｺｳｻﾞﾒｲ": koza_mei, 
+                            "請求額": seikyu_amt, 
+                            "入金額": nyukin_amt, 
+                            "結果区分": result_text,
+                            "整理番号": seiri_num, 
+                            "入金番号": nyukin_val,
+                            "処理日時": proc_date_str,
+                            "入力日": today_str        
+                        }
+                        parsed.append(row)
+                    except:
+                        continue
             
             if parsed:
                 df_parsed = pd.DataFrame(parsed)
@@ -339,7 +371,7 @@ with tab2:
                     key="tab2_dl"
                 )
             else:
-                st.warning("⚠️ 条件に一致するデータ行（先頭が '2' の行）が見つかりませんでした。")
+                st.warning("⚠️ 条件に一致するデータ行（先頭が '2' の行）が見つかりませんでした。ファイルの形式をご確認ください。")
                 
         except Exception as e:
             st.error(f"❌ ファイルの処理中にエラーが発生しました: {e}")
