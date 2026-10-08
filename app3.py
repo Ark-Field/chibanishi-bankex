@@ -12,7 +12,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "引き落としデータ作成（書き出し）",                                       # タブ1
     "入金データ変換（読み込み）",                                             # タブ2
     "CNSコンビニ収納データ作成（17列CSV）",      # タブ3
-    "CNSコンビニ収納データ取込（入金データ＋入金マスタ）"         # タブ4
+    "CNSコンビニ収納データ取込（入金データ＋入金マスタ）"          # タブ4
 ])
 
 
@@ -132,7 +132,7 @@ with tab1:
                             p_bank_id +             
                             " " * 9 +               
                             branch_code_str +       
-                            sjis_ljust("ﾏｸﾊﾘ", 10) +   
+                            sjis_ljust("ﾏｸﾊﾘ", 10) +    
                             " " * 3 +               
                             p_acc_type +            
                             p_acc_num +             
@@ -208,11 +208,11 @@ with tab1:
 
 
 # =====================================================================
-# 📥 タブ2：入金データ変換（読み込み）
+# 📥 タブ2：入金データ変換（読み込み）【CSV対応 ＆ 京葉銀行マスタ置換対応】
 # =====================================================================
 with tab2:
     st.subheader("📥 入金データ読み込み・変換")
-    st.markdown("全銀協フォーマットの入金データを解析し、結果区分や入金額を追加してCSVに変換します。")
+    st.markdown("入金データ（CSV）を読み込み、結果区分や入金額を追加して変換します。（京葉銀行はマスタによる入金番号置換に対応）")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -221,7 +221,13 @@ with tab2:
         processing_date = st.date_input("処理日（入金日）を入力", value=datetime.now(), key="tab2_date")
         proc_date_str = processing_date.strftime("%Y/%m/%d")
 
-    uploaded_file = st.file_uploader("ファイルをアップロードしてください（.txt / .dat / .csv）", type=["txt", "dat", "csv"], key="tab2_uploader")
+    # 京葉銀行の場合のみマスタアップロード欄を表示
+    tab2_master_file = None
+    if bank == "京葉銀行":
+        st.markdown("##### 📁 京葉銀行用マスタファイル（整理番号 ⇔ 入金番号）")
+        tab2_master_file = st.file_uploader("整理番号と入金番号が含まれるマスタファイルを選択（.csv / .xlsx）", type=["csv", "xlsx"], key="tab2_master_uploader")
+
+    uploaded_file = st.file_uploader("入金データファイルをアップロードしてください（.csv）", type=["csv", "txt"], key="tab2_uploader")
     
     result_mapping = {
         "0": "入金", "1": "残保無", "2": "口座無", "3": "預金者都合",
@@ -229,68 +235,115 @@ with tab2:
     }
 
     if uploaded_file:
-        raw = uploaded_file.read().decode("cp932", errors="ignore")
-        lines = raw.splitlines()
-        parsed = []
-        
-        today_str = datetime.now().strftime("%Y/%m/%d")
-        
-        for line in lines:
-            if not line.startswith("2"): 
-                continue
-            b_line = line.encode("cp932", errors="ignore")
-            if len(b_line) < 120: 
-                continue
-            
-            try:
-                tail_str = b_line[101:120].decode("cp932", errors="ignore").strip()
-                last_digit = tail_str[-1] if len(tail_str) >= 1 else ""
+        try:
+            # 京葉銀行マスタの読み込み
+            master_dict = {}
+            if bank == "京葉銀行" and tab2_master_file is not None:
+                try:
+                    if tab2_master_file.name.endswith(".xlsx"):
+                        df_m = pd.read_excel(tab2_master_file, dtype=str)
+                    else:
+                        try:
+                            df_m = pd.read_csv(tab2_master_file, encoding="cp932", dtype=str)
+                        except UnicodeDecodeError:
+                            tab2_master_file.seek(0)
+                            df_m = pd.read_csv(tab2_master_file, encoding="utf-8", dtype=str)
+                    
+                    df_m = df_m.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+                    
+                    if "整理番号" in df_m.columns and "入金番号" in df_m.columns:
+                        df_m['tmp_key'] = pd.to_numeric(df_m['整理番号'], errors='coerce').fillna(0).astype(int).astype(str)
+                        master_dict = dict(zip(df_m['tmp_key'], df_m["入金番号"]))
+                        st.success(f"✅ 京葉銀行マスタを読み込みました（登録件数: {len(master_dict)} 件）")
+                    else:
+                        st.warning("⚠️ マスタファイルに「整理番号」または「入金番号」列が見つかりません。")
+                except Exception as me:
+                    st.warning(f"⚠️ マスタファイルの読み込みに失敗しました: {me}")
 
-                if bank == "千葉銀行":
-                    raw_num = tail_str
-                    nyukin = f"{raw_num[0:4]}-{raw_num[4:6]}-{raw_num[6:8]}-{raw_num[8:12]}" if len(raw_num) >= 12 else raw_num
-                    seiri_num = b_line[96:102].decode("cp932", errors="ignore").strip()
-                    if not seiri_num:
-                        seiri_num = tail_str[:6]
-                else:
-                    raw_num = ""
-                    nyukin = ""
-                    seiri_num = tail_str[:-1] if len(tail_str) >= 1 else tail_str
+            # 入金データの読み込み（CSV形式対応）
+            try:
+                raw_bytes = uploaded_file.read()
+                raw = raw_bytes.decode("cp932", errors="ignore")
+            except:
+                raw = raw_bytes.decode("utf-8", errors="ignore")
                 
-                result_text = result_mapping.get(last_digit, "その他")
-                seikyu_amt = int(b_line[80:90].decode("cp932", errors="ignore").strip())
-                nyukin_amt = seikyu_amt if last_digit == "0" else 0
-                
-                row = {
-                    "銀行ID": b_line[1:5].decode("cp932", errors="ignore").strip(), 
-                    "支店ID": b_line[20:23].decode("cp932", errors="ignore").strip(),
-                    "普/当": b_line[42:43].decode("cp932", errors="ignore").strip(), 
-                    "口座番号": b_line[43:50].decode("cp932", errors="ignore").strip(),
-                    "ｺｳｻﾞﾒｲ": b_line[50:80].decode("cp932", errors="ignore").strip(), 
-                    "請求額": seikyu_amt, 
-                    "入金額": nyukin_amt, 
-                    "結果区分": result_text,
-                    "整理番号": seiri_num, 
-                    "入金番号": nyukin,
-                    "処理日時": proc_date_str,
-                    "入力日": today_str        
-                }
-                parsed.append(row)
-            except: 
-                continue
-        
-        if parsed:
-            df_parsed = pd.DataFrame(parsed)
-            st.dataframe(df_parsed)
+            lines = raw.splitlines()
+            parsed = []
+            today_str = datetime.now().strftime("%Y/%m/%d")
             
-            csv = df_parsed.to_csv(index=False).encode('cp932', errors='ignore')
-            st.download_button(
-                label="📥 処理結果をCSVとして保存",
-                data=csv,
-                file_name=f"log_{bank}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime="text/csv",
-                key="tab2_dl"
-            )
+            for line in lines:
+                cols = [c.strip() for c in line.split(",")]
+                
+                # 先頭が "2" で始まらない行（ヘッダーやフッター）はスキップ
+                if not cols or cols[0] != "2":
+                    continue
+                if len(cols) < 12:
+                    continue
+                
+                try:
+                    bank_id = cols[1]
+                    branch_id = cols[2]
+                    acc_type = cols[3]
+                    acc_num = cols[4]
+                    koza_mei = cols[7]
+                    seikyu_amt = int(cols[8])
+                    last_digit = cols[11]
+                    
+                    result_text = result_mapping.get(last_digit, "その他")
+                    nyukin_amt = seikyu_amt if last_digit == "0" else 0
+                    
+                    # 整理番号の抽出と入金番号の決定
+                    raw_col10 = cols[10] if len(cols) > 10 else ""
+                    
+                    if bank == "京葉銀行":
+                        # 整理番号を数値化してキー化し、マスタから入金番号を引く
+                        clean_seiri = raw_col10.replace("-", "")[:6]
+                        key_val = str(int(pd.to_numeric(pd.Series([clean_seiri]), errors='coerce').fillna(0).iloc[0]))
+                        
+                        seiri_num = clean_seiri
+                        nyukin_val = master_dict.get(key_val, raw_col10) # マスタになければそのまま
+                    else:
+                        # 千葉銀行は現状のまま維持
+                        raw_num = raw_col10
+                        nyukin_val = f"{raw_num[0:4]}-{raw_num[4:6]}-{raw_num[6:8]}-{raw_num[8:12]}" if len(raw_num) >= 12 else raw_num
+                        seiri_num = raw_col10[:6]
+                    
+                    row = {
+                        "銀行ID": bank_id, 
+                        "支店ID": branch_id,
+                        "普/当": acc_type, 
+                        "口座番号": acc_num,
+                        "ｺｳｻﾞﾒｲ": koza_mei, 
+                        "請求額": seikyu_amt, 
+                        "入金額": nyukin_amt, 
+                        "結果区分": result_text,
+                        "整理番号": seiri_num, 
+                        "入金番号": nyukin_val,
+                        "処理日時": proc_date_str,
+                        "入力日": today_str        
+                    }
+                    parsed.append(row)
+                except Exception as ex:
+                    continue
+            
+            if parsed:
+                df_parsed = pd.DataFrame(parsed)
+                st.success(f"✅ {len(df_parsed)} 件のデータを正常に変換しました！")
+                st.dataframe(df_parsed)
+                
+                csv = df_parsed.to_csv(index=False).encode('cp932', errors='ignore')
+                st.download_button(
+                    label="📥 処理結果をCSVとして保存",
+                    data=csv,
+                    file_name=f"log_{bank}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv",
+                    key="tab2_dl"
+                )
+            else:
+                st.warning("⚠️ 条件に一致するデータ行（先頭が '2' の行）が見つかりませんでした。")
+                
+        except Exception as e:
+            st.error(f"❌ ファイルの処理中にエラーが発生しました: {e}")
 
 
 # =====================================================================
@@ -400,14 +453,12 @@ with tab4:
 
     if t4_nyukin_file and t4_master_file:
         try:
-            # 入金データの読み込み
             try:
                 df_t4_n = pd.read_csv(t4_nyukin_file, encoding="cp932", dtype=str)
             except UnicodeDecodeError:
                 t4_nyukin_file.seek(0)
                 df_t4_n = pd.read_csv(t4_nyukin_file, encoding="utf-8", dtype=str)
 
-            # マスタデータの読み込み
             if t4_master_file.name.endswith(".xlsx"):
                 df_t4_m = pd.read_excel(t4_master_file, dtype=str)
             else:
@@ -417,11 +468,9 @@ with tab4:
                     t4_master_file.seek(0)
                     df_t4_m = pd.read_csv(t4_master_file, encoding="utf-8", dtype=str)
 
-            # 空白の除去
             df_t4_n = df_t4_n.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
             df_t4_m = df_t4_m.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
 
-            # 必要な列のチェック
             if "顧客コード" not in df_t4_n.columns:
                 st.error("❌ 入金データ側に「顧客コード」列が見つかりません。")
             elif "整理番号" not in df_t4_m.columns or "入金番号" not in df_t4_m.columns:
@@ -432,7 +481,6 @@ with tab4:
                 if st.button("⚡ 自動紐づけ＆日時変換・切り分けを実行", key="tab4_auto_exec"):
                     df_t4_n = df_t4_n.copy()
                     
-                    # 整理番号が「7桁以下」「10桁の0埋め」などバラバラでも数値化して完璧に一致させます
                     df_t4_n['tmp_key'] = (
                         pd.to_numeric(df_t4_n['顧客コード'], errors='coerce')
                         .fillna(0)
@@ -449,10 +497,8 @@ with tab4:
 
                     master_dict = dict(zip(df_t4_m['tmp_key'], df_t4_m["入金番号"]))
                     
-                    # 紐づけ判定
                     is_matched = df_t4_n['tmp_key'].isin(master_dict.keys())
 
-                    # 1. 正常に紐づいたデータ
                     df_matched = df_t4_n[is_matched].copy()
                     matched_col = df_matched['tmp_key'].map(master_dict)
                     if "入金番号" in df_matched.columns:
@@ -461,30 +507,22 @@ with tab4:
                         df_matched["入金番号"] = matched_col.fillna("")
                     df_matched = df_matched.drop(columns=['tmp_key'])
 
-                    # 2. マスタにない不明入金データ（入金番号をブランクにする）
                     df_unknown = df_t4_n[~is_matched].copy()
                     df_unknown["入金番号"] = ""
                     df_unknown = df_unknown.drop(columns=['tmp_key'])
 
-                    # 共通処理：日付関連の列（処理日時、収納日付など）を YYYY/MM/DD 形式に統一変換する
                     for target_df in [df_matched, df_unknown]:
-                        # 「処理日時」の変換
                         if "処理日時" in target_df.columns:
                             parsed_dates = pd.to_datetime(target_df["処理日時"], errors='coerce')
                             target_df["処理日時"] = parsed_dates.dt.strftime("%Y/%m/%d").fillna(target_df["処理日時"])
                         
-                        # 🌟 「収納日付」（9個目のフィールド等、列名に「日付」や「収納」を含むもの、あるいは特定の列）を YYYY/MM/DD に変換
-                        # ※列名が完全一致、または含まれるものを対象にします
                         for col_name in target_df.columns:
                             if "収納日付" in col_name or "収納日" in col_name or col_name == target_df.columns[8] if len(target_df.columns) > 8 else False:
                                 parsed_shuno = pd.to_datetime(target_df[col_name], errors='coerce')
-                                # もすでに入力がYYYYMMDDの文字列の場合はdatetimeが解釈できるためスラッシュ付きに変換
                                 target_df[col_name] = parsed_shuno.dt.strftime("%Y/%m/%d").fillna(target_df[col_name])
 
-                    # 🌟 日付文字列（YYMMDD形式）の作成（例: 261006）
                     yymmdd_str = datetime.now().strftime("%y%m%d")
 
-                    # 画面に結果を表示
                     st.markdown("---")
                     col_res1, col_res2 = st.columns(2)
 
