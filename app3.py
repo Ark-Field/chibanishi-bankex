@@ -208,7 +208,7 @@ with tab1:
 
 
 # =====================================================================
-# 📥 タブ2：入金データ変換（読み込み）【CSV対応 ＆ 京葉銀行マスタ置換対応】
+# 📥 タブ2：入金データ変換（読み込み）【千葉銀行正常化 ＆ 京葉銀行マスタ置換対応】
 # =====================================================================
 with tab2:
     st.subheader("📥 入金データ読み込み・変換")
@@ -296,17 +296,16 @@ with tab2:
                     raw_col10 = cols[10] if len(cols) > 10 else ""
                     
                     if bank == "京葉銀行":
-                        # 整理番号を数値化してキー化し、マスタから入金番号を引く
+                        # 整理番号を数値化してキー号にし、マスタから入金番号を引く
                         clean_seiri = raw_col10.replace("-", "")[:6]
                         key_val = str(int(pd.to_numeric(pd.Series([clean_seiri]), errors='coerce').fillna(0).iloc[0]))
                         
                         seiri_num = clean_seiri
                         nyukin_val = master_dict.get(key_val, raw_col10) # マスタになければそのまま
                     else:
-                        # 千葉銀行は現状のまま維持
-                        raw_num = raw_col10
-                        nyukin_val = f"{raw_num[0:4]}-{raw_num[4:6]}-{raw_num[6:8]}-{raw_num[8:12]}" if len(raw_num) >= 12 else raw_num
-                        seiri_num = raw_col10[:6]
+                        # 千葉銀行はCSVの入金番号（cols[10]）をそのまま保持する
+                        nyukin_val = raw_col10
+                        seiri_num = raw_col10.replace("-", "")[:6]
                     
                     row = {
                         "銀行ID": bank_id, 
