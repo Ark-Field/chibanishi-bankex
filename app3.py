@@ -212,7 +212,7 @@ with tab1:
 # =====================================================================
 with tab2:
     st.subheader("📥 入金データ読み込み・変換")
-    st.markdown("入金データを読み込み、結果区分や入金額を追加して変換します。（京葉銀行は.dat固定長 ＆ 入金番号の正確な95〜105文字目切り出しに対応）")
+    st.markdown("入金データを読み込み、結果区分や入金額を追加して変換します。（京葉銀行は.dat固定長 ＆ 入金番号の正確な95〜104文字目切り出しに対応）")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -257,8 +257,8 @@ with tab2:
                         result_text = result_mapping.get(last_digit, "その他")
                         nyukin_amt = seikyu_amt if last_digit == "0" else 0
                         
-                        # 🌟 修正：95文字目〜105文字目（Pythonインデックス 94:105）から入金番号を切り出す
-                        raw_nyukin_part = b_line[94:105].decode("cp932", errors="ignore").strip()
+                        # 🌟 修正：95〜104文字目（Pythonインデックス 94:104）から入金番号を切り出す
+                        raw_nyukin_part = b_line[94:104].decode("cp932", errors="ignore").strip()
                         
                         # 整数化して先頭の0をカットする
                         nyukin_val = int(pd.to_numeric(pd.Series([raw_nyukin_part]), errors='coerce').fillna(0).iloc[0])
