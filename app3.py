@@ -4,15 +4,15 @@ from datetime import datetime
 import io
 
 # ページ全体のレイアウト設定（ワイド表示）
-st.set_page_config(layout="wide", page_title="千葉/京葉銀行・コンビニデータ 統合管理ツール", page_icon="🏦")
-st.title("🏦 千葉/京葉銀行・コンビニデータ 統合管理ツール")
+st.set_page_config(layout="wide", page_title="銀行・CNSデータ 統合管理ツール", page_icon="🏦")
+st.title("🏦 銀行・CNSデータ 統合管理ツール")
 
 # タブ構成（全4タブ）
 tab1, tab2, tab3, tab4 = st.tabs([
     "引き落としデータ作成（書き出し）",                                       # タブ1
     "入金データ変換（読み込み）",                                             # タブ2
-    "コンビニ収納データ作成（会費/イベント費）",      # タブ3
-    "コンビニ収納データ取込（入金データ＋入金マスタ）"          # タブ4
+    "CNSコンビニ収納データ作成（17列CSV）",      # タブ3
+    "CNSコンビニ収納データ取込（入金データ＋入金マスタ）"          # タブ4
 ])
 
 
@@ -48,11 +48,11 @@ def sjis_zfill_ljust(string, length):
 
 
 # =====================================================================
-# 📤 タブ1：引き落としデータ作成（書き出し）【千葉銀行/京葉銀行版】
+# 📤 タブ1：引き落としデータ作成（書き出し）【千葉銀行成功事例完全一致版】
 # =====================================================================
 with tab1:
     st.subheader("📤 引き落とし用ファイル（全銀協形式）作成")
-    st.markdown("会員管理から全銀協規格フォーマットの引き落としデータを生成します。（）")
+    st.markdown("依頼エクセルから全銀協規格フォーマットの引き落としデータを生成します。（千葉銀行の成功事例フォーマットに完全準拠）")
     target_bank = st.radio("提出先", ["千葉銀行", "京葉銀行"], key="tab1_bank_radio")
     target_date = st.date_input("振込指定日", key="tab1_target_date")
     month_day = target_date.strftime("%m%d")
@@ -208,11 +208,11 @@ with tab1:
 
 
 # =====================================================================
-# 📥 タブ2：入金データ変換【千葉銀行/京葉銀行版】（読み込み）
+# 📥 タブ2：入金データ変換（読み込み）
 # =====================================================================
 with tab2:
     st.subheader("📥 入金データ読み込み・変換")
-    st.markdown("入金データを読み込み、（会員管理へ）")
+    st.markdown("入金データを読み込み、結果区分や入金額を追加して変換します。（京葉銀行：95〜104文字目を入金番号、112桁目を結果区分として正確に抽出）")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -223,7 +223,19 @@ with tab2:
 
     uploaded_file = st.file_uploader("入金データファイルをアップロードしてください（千葉銀行: .csv / 京葉銀行: .dat, .txt）", type=["csv", "txt", "dat"], key="tab2_uploader")
     
-    result_mapping = {
+    # 🌟 京葉銀行用の結果区分マッピング（訂正版）
+    keiyo_result_mapping = {
+        "0": "入金",
+        "1": "資金不足",
+        "2": "預金取引無",
+        "3": "預金者都合",
+        "4": "振替依頼書なし",
+        "8": "委託者都合",
+        "9": "その他"
+    }
+
+    # 千葉銀行用の結果区分マッピング
+    chiba_result_mapping = {
         "0": "入金", "1": "残保無", "2": "口座無", "3": "預金者都合",
         "4": "振替依頼書無", "8": "委託者都合", "9": "その他"
     }
@@ -253,11 +265,15 @@ with tab2:
                         continue
                     try:
                         seikyu_amt = int(b_line[80:90].decode("cp932", errors="ignore").strip())
-                        last_digit = b_line[90:91].decode("cp932", errors="ignore").strip()
-                        result_text = result_mapping.get(last_digit, "その他")
+                        
+                        # 🌟 112桁目（Pythonインデックス 111:112）を切り出して結果区分とする
+                        last_digit = b_line[111:112].decode("cp932", errors="ignore").strip()
+                        result_text = keiyo_result_mapping.get(last_digit, "その他")
+                        
+                        # 🌟 区分が0以外のときは入金額を0にする
                         nyukin_amt = seikyu_amt if last_digit == "0" else 0
                         
-                        # 🌟 修正：95〜104文字目（Pythonインデックス 94:104）から入金番号を切り出す
+                        # 🌟 95〜104文字目（Pythonインデックス 94:104）から入金番号を切り出す
                         raw_nyukin_part = b_line[94:104].decode("cp932", errors="ignore").strip()
                         
                         # 整数化して先頭の0をカットする
@@ -298,7 +314,7 @@ with tab2:
                         seikyu_amt = int(cols[8])
                         last_digit = cols[11]
                         
-                        result_text = result_mapping.get(last_digit, "その他")
+                        result_text = chiba_result_mapping.get(last_digit, "その他")
                         nyukin_amt = seikyu_amt if last_digit == "0" else 0
                         
                         raw_col10 = cols[10] if len(cols) > 10 else ""
@@ -344,11 +360,11 @@ with tab2:
 
 
 # =====================================================================
-# 🏪 タブ3：コンビニ収納データ作成（会員管理会費/イベント）
+# 🏪 タブ3：CNSコンビニ収納データコンバート（17列CSV）
 # =====================================================================
 with tab3:
-    st.subheader("🏪 コンビニ収納データ 作成")
-    st.markdown("")
+    st.subheader("🏪 CNS コンビニ収納データ 17列CSV変換")
+    st.markdown("17列構成のCSVファイルを読み込み、指定した各期限を設定してCNS指定ヘッダー名で出力します。")
     
     st.markdown("##### 1. お支払期限・バーコード取扱期限・ご請求内容の入力")
     c3_col1, c3_col2, c3_col3 = st.columns(3)
@@ -434,11 +450,11 @@ with tab3:
 
 
 # =====================================================================
-# 🔗 タブ4：コンビニ収納データ取込（会員管理会費/イベント）
+# 🔗 タブ4：マスタ自動紐づけ（顧客コード ⇔ 整理番号）＋ 日付フォーマット変換 ＋ 不明入金切り分け
 # =====================================================================
 with tab4:
-    st.subheader("🔗 コンビニ収納データ取込マスタ自動紐づけ＆不明入金切り分け")
-    st.markdown("入金データの「顧客コード」突合・紐づけを行います。")
+    st.subheader("🔗 マスタ自動紐づけ＆不明入金切り分け")
+    st.markdown("入金データの「顧客コード」（10桁等）とマスタの整理番号を**数値化して桁数の違いや0埋めを自動吸収**し、正しく突合・紐づけを行います。")
     
     col_t4_1, col_t4_2 = st.columns(2)
     with col_t4_1:
